@@ -109,14 +109,13 @@ object RootHelper {
                 callbackType.classLoader,
                 arrayOf(callbackType)
             ) { _, method, argsList ->
-                // Support both accept(int) and accept(boolean) dynamically
                 if (argsList != null && argsList.isNotEmpty()) {
                     val firstArg = argsList[0]
                     println("Callback invoked with arg: $firstArg (${firstArg?.javaClass?.name})")
                     if (firstArg is Boolean) {
                         callbackSuccess = firstArg
                     } else if (firstArg is Number) {
-                        callbackSuccess = (firstArg.toInt() == 0) // 0 means SUCCESS in integer interfaces
+                        callbackSuccess = (firstArg.toInt() == 0)
                     }
                     latch.countDown()
                 }
@@ -124,36 +123,89 @@ object RootHelper {
             }
         }
 
-        // 6. Invoke method mapping primitive types correctly
-        val invokeArgs = arrayOfNulls<Any>(paramTypes.size)
-        
-        // Find subscription ID for the given slotIndex using static method getSubscriptionId
+        // 6. Resolve subId (Triple Redundant)
         var targetSubId = -1
+        
+        // Lapis 1: Refleksi Context System (Prioritas 1)
         try {
-            val subManagerClass = Class.forName("android.telephony.SubscriptionManager")
-            // Calling static `getSubscriptionId` instead of non-static `getSubscriptionIds`
-            val getSubIdMethod = subManagerClass.getMethod("getSubscriptionId", Int::class.java)
-            val res = getSubIdMethod.invoke(null, slotIndex) as? Int
-            if (res != null && res != -1) {
-                targetSubId = res
+            val activityThreadClass = Class.forName("android.app.ActivityThread")
+            val systemMainMethod = activityThreadClass.getMethod("systemMain")
+            val activityThread = systemMainMethod.invoke(null)
+            val getSystemContextMethod = activityThreadClass.getMethod("getSystemContext")
+            val systemContext = getSystemContextMethod.invoke(activityThread)
+            
+            val contextClass = Class.forName("android.content.Context")
+            val getSystemServiceMethod = contextClass.getMethod("getSystemService", String::class.java)
+            val subManager = getSystemServiceMethod.invoke(systemContext, "telephony_subscription_service")
+            
+            if (subManager != null) {
+                val subManagerClass = Class.forName("android.telephony.SubscriptionManager")
+                val getActiveSubMethod = subManagerClass.getMethod("getActiveSubscriptionInfoForSimSlotIndex", Int::class.java)
+                val subInfo = getActiveSubMethod.invoke(subManager, slotIndex)
+                
+                if (subInfo != null) {
+                    val subInfoClass = Class.forName("android.telephony.SubscriptionInfo")
+                    val getSubIdMethod = subInfoClass.getMethod("getSubscriptionId")
+                    targetSubId = getSubIdMethod.invoke(subInfo) as Int
+                    println("Lapis 1 (Context Refleksi) sukses, subId = $targetSubId")
+                }
             }
         } catch (t: Throwable) {
-            println("Failed to read SubscriptionManager for slot. Error: ${t.message}")
+            println("Lapis 1 gagal: ${t.message}")
         }
         
-        // Fallback to default subscription ID if slot manager fails
+        // Lapis 2: Dumpsys Parsing (Prioritas 2)
+        if (targetSubId == -1) {
+            try {
+                val process = Runtime.getRuntime().exec("dumpsys subscription")
+                val reader = process.inputStream.bufferedReader()
+                var line: String?
+                while (reader.readLine().also { line = it } != null) {
+                    val l = line!!
+                    if (l.contains("simSlotIndex=") || l.contains("simSlotIndex :") || l.contains("mSlotIndex=")) {
+                        val idMatch = Regex("""\bid[ =:]+(\d+)""").find(l) ?: Regex("""\bmSubId[ =:]+(\d+)""").find(l)
+                        val slotMatch = Regex("""\bsimSlotIndex[ =:]+(\d+)""").find(l) ?: Regex("""\bmSlotIndex[ =:]+(\d+)""").find(l)
+                        if (idMatch != null && slotMatch != null) {
+                            val id = idMatch.groupValues[1].toInt()
+                            val slot = slotMatch.groupValues[1].toInt()
+                            if (slot == slotIndex) {
+                                targetSubId = id
+                                println("Lapis 2 (Dumpsys Parsing) sukses, subId = $targetSubId")
+                                break
+                            }
+                        }
+                    }
+                }
+            } catch (t: Throwable) {
+                println("Lapis 2 gagal: ${t.message}")
+            }
+        }
+        
+        // Lapis 3: Fallback Static Method (Prioritas 3)
         if (targetSubId == -1) {
             try {
                 val subManagerClass = Class.forName("android.telephony.SubscriptionManager")
-                val getDefaultSubId = subManagerClass.getMethod("getDefaultSubscriptionId")
-                targetSubId = getDefaultSubId.invoke(null) as Int
+                val getSubIdMethod = subManagerClass.getMethod("getSubscriptionId", Int::class.java)
+                val res = getSubIdMethod.invoke(null, slotIndex) as? Int
+                if (res != null && res != -1) {
+                    targetSubId = res
+                    println("Lapis 3 (Static Fallback) sukses, subId = $targetSubId")
+                }
             } catch (t: Throwable) {
-                targetSubId = 1
+                println("Lapis 3 gagal: ${t.message}")
             }
+        }
+        
+        // Final fallback: default subId ke slot index + 1
+        if (targetSubId == -1) {
+            targetSubId = slotIndex + 1
+            println("Semua lapis gagal, gunakan fallback kasar = $targetSubId")
         }
         
         println("Resolved Subscription ID for slot $slotIndex: $targetSubId")
 
+        // 7. Invoke method
+        val invokeArgs = arrayOfNulls<Any>(paramTypes.size)
         for (i in paramTypes.indices) {
             val type = paramTypes[i]
             when {
