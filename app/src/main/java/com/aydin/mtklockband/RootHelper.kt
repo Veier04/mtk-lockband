@@ -203,20 +203,27 @@ object RootHelper {
         selectSimSlot(slotIndex)
         
         // Calculate LTE Bitmask
-        var lteMaskLow = 0L
+                var lteMaskLow = 0L
         var lteMaskHigh = 0L
+        var nrMask1 = 0L
+        var nrMask2 = 0L
+        var nrMask3 = 0L
         
         for (b in bands) {
             if (b in 1..32) {
                 lteMaskLow = lteMaskLow or (1L shl (b - 1))
             } else if (b in 33..64) {
                 lteMaskHigh = lteMaskHigh or (1L shl (b - 33))
+            } else if (b > 1000) {
+                val nrId = b - 1000
+                if (nrId in 1..32) nrMask1 = nrMask1 or (1L shl (nrId - 1))
+                else if (nrId in 33..64) nrMask2 = nrMask2 or (1L shl (nrId - 33))
+                else if (nrId in 65..96) nrMask3 = nrMask3 or (1L shl (nrId - 65))
             }
         }
         
-        // Execute EPBSE band lock command
-        // AT+EPBSE=<gsm>,<wcdma>,<lte_l>,<lte_h>,<nr_l>,<nr_h>,...
-        val epbseCmd = "AT+EPBSE=154,155,$lteMaskLow,$lteMaskHigh,0,0,0,0,0,0"
+        // Execute EPBSE band lock command extended with NR capabilities
+        val epbseCmd = "AT+EPBSE=154,155,$lteMaskLow,$lteMaskHigh,$nrMask1,$nrMask2,$nrMask3,0,0,0" 
         println("Sending Band Lock: $epbseCmd")
         val epbseRes = sendAtCommand(epbseCmd)
         println("  Response: $epbseRes")

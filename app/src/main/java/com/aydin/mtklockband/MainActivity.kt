@@ -72,16 +72,37 @@ fun LockBandScreen(apkPath: String) {
     // Supported bands list
     val bandsList = remember {
         listOf(
-            BandItem(1, "2100 MHz (XL, Tsel, Indosat, Tri)"),
-            BandItem(3, "1800 MHz (XL, Tsel, Indosat, Tri)"),
-            BandItem(5, "850 MHz (Smartfren, XL)"),
-            BandItem(7, "2600 MHz (Future/Inter)"),
-            BandItem(8, "900 MHz (XL, Tsel, Indosat)"),
-            BandItem(20, "800 MHz (Rural Area)"),
-            BandItem(28, "700 MHz (Tsel, Indosat - Digital Dividend)"),
-            BandItem(38, "2600 MHz TDD"),
-            BandItem(40, "2300 MHz TDD (Smartfren, Tsel)"),
-            BandItem(41, "2500 MHz TDD (Indosat)")
+            BandItem(1, "LTE B1 - 2100 MHz"),
+            BandItem(2, "LTE B2 - 1900 MHz"),
+            BandItem(3, "LTE B3 - 1800 MHz"),
+            BandItem(4, "LTE B4 - 1700 MHz"),
+            BandItem(5, "LTE B5 - 850 MHz"),
+            BandItem(7, "LTE B7 - 2600 MHz"),
+            BandItem(8, "LTE B8 - 900 MHz"),
+            BandItem(12, "LTE B12 - 700 MHz"),
+            BandItem(13, "LTE B13 - 700 MHz"),
+            BandItem(17, "LTE B17 - 700 MHz"),
+            BandItem(20, "LTE B20 - 800 MHz"),
+            BandItem(28, "LTE B28 - 700 MHz"),
+            BandItem(38, "LTE B38 - 2600 MHz TDD"),
+            BandItem(39, "LTE B39 - 1900 MHz TDD"),
+            BandItem(40, "LTE B40 - 2300 MHz TDD"),
+            BandItem(41, "LTE B41 - 2500 MHz TDD"),
+            BandItem(42, "LTE B42 - 3500 MHz TDD"),
+            BandItem(66, "LTE B66 - 1700 MHz"),
+            BandItem(1001, "5G n1 - 2100 MHz"),
+            BandItem(1003, "5G n3 - 1800 MHz"),
+            BandItem(1005, "5G n5 - 850 MHz"),
+            BandItem(1007, "5G n7 - 2600 MHz"),
+            BandItem(1008, "5G n8 - 900 MHz"),
+            BandItem(1020, "5G n20 - 800 MHz"),
+            BandItem(1028, "5G n28 - 700 MHz"),
+            BandItem(1038, "5G n38 - 2600 MHz TDD"),
+            BandItem(1040, "5G n40 - 2300 MHz TDD"),
+            BandItem(1041, "5G n41 - 2500 MHz TDD"),
+            BandItem(1077, "5G n77 - 3700 MHz TDD"),
+            BandItem(1078, "5G n78 - 3500 MHz TDD"),
+            BandItem(1079, "5G n79 - 4700 MHz TDD")
         )
     }
 
@@ -324,7 +345,7 @@ fun LockBandScreen(apkPath: String) {
                                     shape = RoundedCornerShape(4.dp),
                                     modifier = Modifier.height(28.dp)
                                 ) {
-                                    Text(if (priorityBand == 0) "Tanpa Prioritas" else "LTE B$priorityBand", fontSize = 11.sp)
+                                    Text(if (priorityBand == 0) "Tanpa Prioritas" else if (priorityBand > 1000) "5G n${priorityBand - 1000}" else "LTE B$priorityBand", fontSize = 11.sp)
                                 }
                                 DropdownMenu(expanded = expandedDropdown, onDismissRequest = { expandedDropdown = false }) {
                                     DropdownMenuItem(
@@ -333,7 +354,7 @@ fun LockBandScreen(apkPath: String) {
                                     )
                                     selectedBands.forEach { b ->
                                         DropdownMenuItem(
-                                            text = { Text("LTE Band $b") },
+                                            text = { Text(if (b > 1000) "5G n${b - 1000}" else "LTE Band $b") },
                                             onClick = { priorityBand = b; expandedDropdown = false }
                                         )
                                     }
@@ -397,7 +418,7 @@ fun LockBandScreen(apkPath: String) {
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Column {
                                         Text(
-                                            text = "LTE Band ${band.id}",
+                                            text = if (band.id > 1000) "5G NR n${band.id - 1000}" else "LTE Band ${band.id}",
                                             fontWeight = FontWeight.Bold,
                                             color = Color.White,
                                             fontSize = 14.sp
