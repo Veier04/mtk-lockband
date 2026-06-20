@@ -62,6 +62,7 @@ object RootHelper {
         // 1. Get ServiceManager class
         val serviceManagerClass = Class.forName("android.os.ServiceManager")
         val getServiceMethod: Method = serviceManagerClass.getMethod("getService", String::class.java)
+        
         val phoneBinder = getServiceMethod.invoke(null, "phone") as? IBinder
         if (phoneBinder == null) {
             println("ERROR: Phone binder service not found")
@@ -123,38 +124,66 @@ object RootHelper {
             }
         }
 
-        // 6. Resolve subId (Triple Redundant)
+        // 6. Resolve subId (Quadruple Redundant)
         var targetSubId = -1
         
-        // Lapis 1: Refleksi Context System (Prioritas 1)
+        // Lapis 1: Query binder 'isub' Langsung (Prioritas Teratas - Paling Akurat untuk Root CLI)
         try {
-            val activityThreadClass = Class.forName("android.app.ActivityThread")
-            val systemMainMethod = activityThreadClass.getMethod("systemMain")
-            val activityThread = systemMainMethod.invoke(null)
-            val getSystemContextMethod = activityThreadClass.getMethod("getSystemContext")
-            val systemContext = getSystemContextMethod.invoke(activityThread)
-            
-            val contextClass = Class.forName("android.content.Context")
-            val getSystemServiceMethod = contextClass.getMethod("getSystemService", String::class.java)
-            val subManager = getSystemServiceMethod.invoke(systemContext, "telephony_subscription_service")
-            
-            if (subManager != null) {
-                val subManagerClass = Class.forName("android.telephony.SubscriptionManager")
-                val getActiveSubMethod = subManagerClass.getMethod("getActiveSubscriptionInfoForSimSlotIndex", Int::class.java)
-                val subInfo = getActiveSubMethod.invoke(subManager, slotIndex)
+            val isubBinder = getServiceMethod.invoke(null, "isub") as? IBinder
+            if (isubBinder != null) {
+                val isubStubClass = Class.forName("com.android.internal.telephony.ISub\$Stub")
+                val isubAsInterface = isubStubClass.getMethod("asInterface", IBinder::class.java)
+                val isubService = isubAsInterface.invoke(null, isubBinder)
                 
-                if (subInfo != null) {
-                    val subInfoClass = Class.forName("android.telephony.SubscriptionInfo")
-                    val getSubIdMethod = subInfoClass.getMethod("getSubscriptionId")
-                    targetSubId = getSubIdMethod.invoke(subInfo) as Int
-                    println("Lapis 1 (Context Refleksi) sukses, subId = $targetSubId")
+                if (isubService != null) {
+                    val getSubIdMethod = isubService.javaClass.methods.find { it.name == "getSubId" }
+                    if (getSubIdMethod != null) {
+                        val result = getSubIdMethod.invoke(isubService, slotIndex)
+                        if (result is IntArray && result.isNotEmpty()) {
+                            targetSubId = result[0]
+                            println("Lapis 1 (ISub Binder) sukses, subId = $targetSubId")
+                        } else if (result is Int) {
+                            targetSubId = result
+                            println("Lapis 1 (ISub Binder) sukses, subId = $targetSubId")
+                        }
+                    }
                 }
             }
         } catch (t: Throwable) {
-            println("Lapis 1 gagal: ${t.message}")
+            println("Lapis 1 (ISub Binder) gagal: ${t.message}")
         }
         
-        // Lapis 2: Dumpsys Parsing (Prioritas 2)
+        // Lapis 2: Refleksi Context System
+        if (targetSubId == -1) {
+            try {
+                val activityThreadClass = Class.forName("android.app.ActivityThread")
+                val systemMainMethod = activityThreadClass.getMethod("systemMain")
+                val activityThread = systemMainMethod.invoke(null)
+                val getSystemContextMethod = activityThreadClass.getMethod("getSystemContext")
+                val systemContext = getSystemContextMethod.invoke(activityThread)
+                
+                val contextClass = Class.forName("android.content.Context")
+                val getSystemServiceMethod = contextClass.getMethod("getSystemService", String::class.java)
+                val subManager = getSystemServiceMethod.invoke(systemContext, "telephony_subscription_service")
+                
+                if (subManager != null) {
+                    val subManagerClass = Class.forName("android.telephony.SubscriptionManager")
+                    val getActiveSubMethod = subManagerClass.getMethod("getActiveSubscriptionInfoForSimSlotIndex", Int::class.java)
+                    val subInfo = getActiveSubMethod.invoke(subManager, slotIndex)
+                    
+                    if (subInfo != null) {
+                        val subInfoClass = Class.forName("android.telephony.SubscriptionInfo")
+                        val getSubIdMethod = subInfoClass.getMethod("getSubscriptionId")
+                        targetSubId = getSubIdMethod.invoke(subInfo) as Int
+                        println("Lapis 2 (Context Refleksi) sukses, subId = $targetSubId")
+                    }
+                }
+            } catch (t: Throwable) {
+                println("Lapis 2 gagal: ${t.message}")
+            }
+        }
+        
+        // Lapis 3: Dumpsys Parsing
         if (targetSubId == -1) {
             try {
                 val process = Runtime.getRuntime().exec("dumpsys subscription")
@@ -170,18 +199,18 @@ object RootHelper {
                             val slot = slotMatch.groupValues[1].toInt()
                             if (slot == slotIndex) {
                                 targetSubId = id
-                                println("Lapis 2 (Dumpsys Parsing) sukses, subId = $targetSubId")
+                                println("Lapis 3 (Dumpsys Parsing) sukses, subId = $targetSubId")
                                 break
                             }
                         }
                     }
                 }
             } catch (t: Throwable) {
-                println("Lapis 2 gagal: ${t.message}")
+                println("Lapis 3 gagal: ${t.message}")
             }
         }
         
-        // Lapis 3: Fallback Static Method (Prioritas 3)
+        // Lapis 4: Fallback Static Method
         if (targetSubId == -1) {
             try {
                 val subManagerClass = Class.forName("android.telephony.SubscriptionManager")
@@ -189,14 +218,14 @@ object RootHelper {
                 val res = getSubIdMethod.invoke(null, slotIndex) as? Int
                 if (res != null && res != -1) {
                     targetSubId = res
-                    println("Lapis 3 (Static Fallback) sukses, subId = $targetSubId")
+                    println("Lapis 4 (Static Fallback) sukses, subId = $targetSubId")
                 }
             } catch (t: Throwable) {
-                println("Lapis 3 gagal: ${t.message}")
+                println("Lapis 4 gagal: ${t.message}")
             }
         }
         
-        // Final fallback: default subId ke slot index + 1
+        // Final fallback: default subId ke slot index + 1 (mencegah -1)
         if (targetSubId == -1) {
             targetSubId = slotIndex + 1
             println("Semua lapis gagal, gunakan fallback kasar = $targetSubId")
