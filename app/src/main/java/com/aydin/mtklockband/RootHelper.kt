@@ -127,14 +127,15 @@ object RootHelper {
         // 6. Invoke method mapping primitive types correctly
         val invokeArgs = arrayOfNulls<Any>(paramTypes.size)
         
-        // Find subscription ID for the given slotIndex
+        // Find subscription ID for the given slotIndex using static method getSubscriptionId
         var targetSubId = -1
         try {
             val subManagerClass = Class.forName("android.telephony.SubscriptionManager")
-            val getSubIdsMethod = subManagerClass.getMethod("getSubscriptionIds", Int::class.java)
-            val subIds = getSubIdsMethod.invoke(null, slotIndex) as? IntArray
-            if (subIds != null && subIds.isNotEmpty()) {
-                targetSubId = subIds[0]
+            // Calling static `getSubscriptionId` instead of non-static `getSubscriptionIds`
+            val getSubIdMethod = subManagerClass.getMethod("getSubscriptionId", Int::class.java)
+            val res = getSubIdMethod.invoke(null, slotIndex) as? Int
+            if (res != null && res != -1) {
+                targetSubId = res
             }
         } catch (t: Throwable) {
             println("Failed to read SubscriptionManager for slot. Error: ${t.message}")
@@ -173,7 +174,6 @@ object RootHelper {
                 val callbackReceived = latch.await(4, TimeUnit.SECONDS)
                 if (!callbackReceived) {
                     println("WARNING: Timeout waiting for callback response. Operation might still succeed.")
-                    // Fallback to true if invocation succeeded but callback timed out
                     return true
                 }
                 return callbackSuccess
