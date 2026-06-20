@@ -202,7 +202,7 @@ fun LockBandScreen(apkPath: String) {
 data class BandItem(val id: Int, val description: String)
 
 private suspend fun runRootCommand(cmd: String, args: String, apkPath: String): String = withContext(Dispatchers.IO) {
-    val shellCommand = "su -c \"export CLASSPATH=$apkPath && exec app_process / com.aydin.mtklockband.RootHelper $cmd $args\""
+    val shellCommand = "su -c \"settings put global hidden_api_policy 1 && export CLASSPATH=$apkPath && exec app_process / com.aydin.mtklockband.RootHelper $cmd $args\""
     val output = StringBuilder()
     try {
         val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", shellCommand))
