@@ -1,18 +1,16 @@
 package com.aydin.mtklockband
 
-import android.os.IBinder
-import android.telephony.RadioAccessSpecifier
-import java.lang.reflect.Method
-import java.lang.reflect.Proxy
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
+import android.net.LocalSocket
+import android.net.LocalSocketAddress
+import java.io.InputStream
+import java.io.OutputStream
 
 object RootHelper {
 
     @JvmStatic
     fun main(args: Array<String>) {
         if (args.isEmpty()) {
-            println("ERROR: No arguments. Use 'lock <bands> <slot>' or 'reset <slot>'")
+            println("ERROR: No arguments. Try 'lock', 'reset', 'rat', 'lock_cell', 'unlock_cell'")
             System.exit(1)
         }
 
@@ -20,28 +18,67 @@ object RootHelper {
         try {
             when (cmd) {
                 "lock" -> {
-                    if (args.size < 3) {
-                        println("ERROR: Missing arguments. Usage: lock <bands> <slot_index>")
+                    // lock <bands_comma> <priority_band> <slot>
+                    if (args.size < 4) {
+                        println("ERROR: Usage: lock <bands_comma> <priority_band> <slot_index>")
                         System.exit(1)
                     }
                     val bandStr = args[1]
-                    val slotIndex = args[2].toIntOrNull() ?: 0
+                    val priorityBand = args[2].toIntOrNull() ?: 0
+                    val slotIndex = args[3].toIntOrNull() ?: 0
                     
                     val bands = bandStr.split(",")
                         .mapNotNull { it.trim().toIntOrNull() }
                         .toIntArray()
-                    
-                    if (bands.isEmpty()) {
-                        println("ERROR: Valid bands list is empty")
-                        System.exit(1)
-                    }
-
-                    val success = setBands(bands, slotIndex)
+                        
+                    val success = lockBandsAndPriority(bands, priorityBand, slotIndex)
                     println("RESULT:" + if (success) "SUCCESS" else "FAILED")
                 }
                 "reset" -> {
+                    // reset <slot>
                     val slotIndex = if (args.size >= 2) args[1].toIntOrNull() ?: 0 else 0
-                    val success = setBands(intArrayOf(), slotIndex)
+                    val success = resetModem(slotIndex)
+                    println("RESULT:" + if (success) "SUCCESS" else "FAILED")
+                }
+                "rat" -> {
+                    // rat <rat_mode> <slot>
+                    if (args.size < 3) {
+                        println("ERROR: Usage: rat <rat_mode> <slot_index>")
+                        System.exit(1)
+                    }
+                    val ratMode = args[1].toIntOrNull() ?: 33
+                    val slotIndex = args[2].toIntOrNull() ?: 0
+                    val success = setNetworkMode(ratMode, slotIndex)
+                    println("RESULT:" + if (success) "SUCCESS" else "FAILED")
+                }
+                "lock_cell" -> {
+                    // lock_cell <mcc> <mnc> <earfcn> <pci> <slot>
+                    if (args.size < 6) {
+                        println("ERROR: Usage: lock_cell <mcc> <mnc> <earfcn> <pci> <slot_index>")
+                        System.exit(1)
+                    }
+                    val mcc = args[1]
+                    val mnc = args[2]
+                    val earfcn = args[3].toIntOrNull() ?: 0
+                    val pci = args[4].toIntOrNull() ?: 0
+                    val slotIndex = args[5].toIntOrNull() ?: 0
+                    
+                    val success = setCellLock(1, mcc, mnc, earfcn, pci, slotIndex)
+                    println("RESULT:" + if (success) "SUCCESS" else "FAILED")
+                }
+                "unlock_cell" -> {
+                    // unlock_cell <mcc> <mnc> <earfcn> <pci> <slot>
+                    if (args.size < 6) {
+                        println("ERROR: Usage: unlock_cell <mcc> <mnc> <earfcn> <pci> <slot_index>")
+                        System.exit(1)
+                    }
+                    val mcc = args[1]
+                    val mnc = args[2]
+                    val earfcn = args[3].toIntOrNull() ?: 0
+                    val pci = args[4].toIntOrNull() ?: 0
+                    val slotIndex = args[5].toIntOrNull() ?: 0
+                    
+                    val success = setCellLock(0, mcc, mnc, earfcn, pci, slotIndex)
                     println("RESULT:" + if (success) "SUCCESS" else "FAILED")
                 }
                 else -> {
@@ -59,232 +96,146 @@ object RootHelper {
     // Typical Indonesian telecom EARFCN ranges mapping
     private fun getCommonEarfcnForBand(band: Int): IntArray {
         return when (band) {
-            1 -> intArrayOf(100, 225, 300, 325, 375, 425)                 // 2100 MHz (XL, Tsel, ISAT, Tri)
-            3 -> intArrayOf(1275, 1325, 1375, 1825, 1850)                // 1800 MHz (XL, Tsel, ISAT, Tri)
-            5 -> intArrayOf(2450, 2550, 2600)                            // 850 MHz (Smartfren, XL)
+            1 -> intArrayOf(100, 225, 300, 325, 375, 425)                 // 2100 MHz
+            3 -> intArrayOf(1275, 1325, 1375, 1825, 1850)                // 1800 MHz
+            5 -> intArrayOf(2450, 2550, 2600)                            // 850 MHz
             7 -> intArrayOf(2850, 3050, 3300)                            // 2600 MHz
-            8 -> intArrayOf(3500, 3525, 3550, 3575, 3740)                // 900 MHz (XL, ISAT, Tsel)
+            8 -> intArrayOf(3500, 3525, 3550, 3575, 3740)                // 900 MHz
             20 -> intArrayOf(6200, 6300, 6400)                           // 800 MHz
-            28 -> intArrayOf(9260, 9360, 9460)                           // 700 MHz (Tsel, ISAT)
-            38 -> intArrayOf(37900, 38000, 38100)                        // 2600 MHz TDD
-            40 -> intArrayOf(38950, 39150, 39350, 40100, 40300)          // 2300 MHz TDD (Smartfren, Tsel)
-            41 -> intArrayOf(39750, 40300, 40620, 41240)                 // 2500 MHz TDD (ISAT)
+            28 -> intArrayOf(9260, 9360, 9460)                           // 700 MHz
+            38 -> intArrayOf(37900, 38000, 38100)                        // 2600 TDD
+            40 -> intArrayOf(38950, 39150, 39350, 40100, 40300)          // 2300 TDD
+            41 -> intArrayOf(39750, 40300, 40620, 41240)                 // 2500 TDD
             else -> intArrayOf()
         }
     }
 
-    private fun setBands(bands: IntArray, slotIndex: Int): Boolean {
-        println("Attempting to lock bands: ${if(bands.isEmpty()) "ALL/RESET" else bands.joinToString(", ")} on SIM slot $slotIndex")
-        
-        // 1. Get ServiceManager class
-        val serviceManagerClass = Class.forName("android.os.ServiceManager")
-        val getServiceMethod: Method = serviceManagerClass.getMethod("getService", String::class.java)
-        
-        val phoneBinder = getServiceMethod.invoke(null, "phone") as? IBinder
-        if (phoneBinder == null) {
-            println("ERROR: Phone binder service not found")
-            return false
-        }
-
-        // 2. Get ITelephony interface
-        val iTelephonyClass = Class.forName("com.android.internal.telephony.ITelephony")
-        val stubClass = Class.forName("com.android.internal.telephony.ITelephony\$Stub")
-        val asInterfaceMethod: Method = stubClass.getMethod("asInterface", IBinder::class.java)
-        val telephonyService = asInterfaceMethod.invoke(null, phoneBinder)
-        if (telephonyService == null) {
-            println("ERROR: Could not bind ITelephony interface")
-            return false
-        }
-
-        // 3. Find setSystemSelectionChannels method dynamically
-        val methods = iTelephonyClass.methods
-        val targetMethod = methods.find { it.name == "setSystemSelectionChannels" }
-        if (targetMethod == null) {
-            println("ERROR: Method setSystemSelectionChannels not found on ITelephony")
-            return false
-        }
-
-        println("Found target method: $targetMethod")
-
-        // 4. Create RadioAccessSpecifier with explicit frequencies (EARFCN)
-        val specifiers = ArrayList<RadioAccessSpecifier>()
-        if (bands.isNotEmpty()) {
-            for (band in bands) {
-                val channels = getCommonEarfcnForBand(band)
-                // AccessNetworkConstants.AccessNetworkType.EUTRAN = 3 (LTE)
-                val ras = RadioAccessSpecifier(3, intArrayOf(band), channels)
-                specifiers.add(ras)
-                println("Built specifier for LTE Band $band with EARFCNs: ${channels.joinToString(", ")}")
-            }
-        }
-
-        // 5. Generate Dynamic Proxy for the callback
-        val paramTypes = targetMethod.parameterTypes
-        val callbackType = paramTypes.find { it.isInterface && it.name.contains("Consumer") }
-        
-        var callbackInstance: Any? = null
-        val latch = CountDownLatch(1)
-        var callbackSuccess = false
-
-        if (callbackType != null) {
-            println("Found callback type: ${callbackType.name}")
-            callbackInstance = Proxy.newProxyInstance(
-                callbackType.classLoader,
-                arrayOf(callbackType)
-            ) { _, method, argsList ->
-                if (argsList != null && argsList.isNotEmpty()) {
-                    val firstArg = argsList[0]
-                    println("Callback invoked with arg: $firstArg (${firstArg?.javaClass?.name})")
-                    if (firstArg is Boolean) {
-                        callbackSuccess = firstArg
-                    } else if (firstArg is Number) {
-                        callbackSuccess = (firstArg.toInt() == 0)
-                    }
-                    latch.countDown()
-                }
-                null
-            }
-        }
-
-        // 6. Resolve subId (Quadruple Redundant)
-        var targetSubId = -1
-        
-        // Lapis 1: Query binder 'isub' Langsung
+    // Communication bridge directly via Unix socket length-prefix protocol
+    private fun sendAtCommand(cmd: String): String {
+        val socket = LocalSocket()
         try {
-            val isubBinder = getServiceMethod.invoke(null, "isub") as? IBinder
-            if (isubBinder != null) {
-                val isubStubClass = Class.forName("com.android.internal.telephony.ISub\$Stub")
-                val isubAsInterface = isubStubClass.getMethod("asInterface", IBinder::class.java)
-                val isubService = isubAsInterface.invoke(null, isubBinder)
-                
-                if (isubService != null) {
-                    val getSubIdMethod = isubService.javaClass.methods.find { it.name == "getSubId" }
-                    if (getSubIdMethod != null) {
-                        val result = getSubIdMethod.invoke(isubService, slotIndex)
-                        if (result is IntArray && result.isNotEmpty()) {
-                            targetSubId = result[0]
-                            println("Lapis 1 (ISub Binder) sukses, subId = $targetSubId")
-                        } else if (result is Int) {
-                            targetSubId = result
-                            println("Lapis 1 (ISub Binder) sukses, subId = $targetSubId")
-                        }
-                    }
-                }
+            socket.connect(LocalSocketAddress("/dev/socket/rild-atci", LocalSocketAddress.Namespace.FILESYSTEM))
+            
+            val payload = (cmd + "\r\n").toByteArray(Charsets.UTF_8)
+            val header = ByteArray(4)
+            header[0] = ((payload.size shr 24) and 0xFF).toByte()
+            header[1] = ((payload.size shr 16) and 0xFF).toByte()
+            header[2] = ((payload.size shr 8) and 0xFF).toByte()
+            header[3] = (payload.size and 0xFF).toByte()
+            
+            val out = socket.outputStream
+            out.write(header)
+            out.write(payload)
+            out.flush()
+            
+            socket.soTimeout = 2000
+            val input = socket.inputStream
+            
+            val resHeader = ByteArray(4)
+            var readHeaderLen = 0
+            while (readHeaderLen < 4) {
+                val r = input.read(resHeader, readHeaderLen, 4 - readHeaderLen)
+                if (r == -1) break
+                readHeaderLen += r
             }
-        } catch (t: Throwable) {
-            println("Lapis 1 (ISub Binder) gagal: ${t.message}")
-        }
-        
-        // Lapis 2: Refleksi Context System
-        if (targetSubId == -1) {
-            try {
-                val activityThreadClass = Class.forName("android.app.ActivityThread")
-                val systemMainMethod = activityThreadClass.getMethod("systemMain")
-                val activityThread = systemMainMethod.invoke(null)
-                val getSystemContextMethod = activityThreadClass.getMethod("getSystemContext")
-                val systemContext = getSystemContextMethod.invoke(activityThread)
-                
-                val contextClass = Class.forName("android.content.Context")
-                val getSystemServiceMethod = contextClass.getMethod("getSystemService", String::class.java)
-                val subManager = getSystemServiceMethod.invoke(systemContext, "telephony_subscription_service")
-                
-                if (subManager != null) {
-                    val subManagerClass = Class.forName("android.telephony.SubscriptionManager")
-                    val getActiveSubMethod = subManagerClass.getMethod("getActiveSubscriptionInfoForSimSlotIndex", Int::class.java)
-                    val subInfo = getActiveSubMethod.invoke(subManager, slotIndex)
-                    
-                    if (subInfo != null) {
-                        val subInfoClass = Class.forName("android.telephony.SubscriptionInfo")
-                        val getSubIdMethod = subInfoClass.getMethod("getSubscriptionId")
-                        targetSubId = getSubIdMethod.invoke(subInfo) as Int
-                        println("Lapis 2 (Context Refleksi) sukses, subId = $targetSubId")
-                    }
+            
+            if (readHeaderLen == 4) {
+                val resLen = ((resHeader[0].toInt() and 0xFF) shl 24) or
+                             ((resHeader[1].toInt() and 0xFF) shl 16) or
+                             ((resHeader[2].toInt() and 0xFF) shl 8) or
+                             (resHeader[3].toInt() and 0xFF)
+                             
+                val resPayload = ByteArray(resLen)
+                var readPayloadLen = 0
+                while (readPayloadLen < resLen) {
+                    val r = input.read(resPayload, readPayloadLen, resLen - readPayloadLen)
+                    if (r == -1) break
+                    readPayloadLen += r
                 }
-            } catch (t: Throwable) {
-                println("Lapis 2 gagal: ${t.message}")
+                return String(resPayload, Charsets.UTF_8).trim()
             }
-        }
-        
-        // Lapis 3: Dumpsys Parsing
-        if (targetSubId == -1) {
-            try {
-                val process = Runtime.getRuntime().exec("dumpsys subscription")
-                val reader = process.inputStream.bufferedReader()
-                var line: String?
-                while (reader.readLine().also { line = it } != null) {
-                    val l = line!!
-                    if (l.contains("simSlotIndex=") || l.contains("simSlotIndex :") || l.contains("mSlotIndex=")) {
-                        val idMatch = Regex("""\bid[ =:]+(\d+)""").find(l) ?: Regex("""\bmSubId[ =:]+(\d+)""").find(l)
-                        val slotMatch = Regex("""\bsimSlotIndex[ =:]+(\d+)""").find(l) ?: Regex("""\bmSlotIndex[ =:]+(\d+)""").find(l)
-                        if (idMatch != null && slotMatch != null) {
-                            val id = idMatch.groupValues[1].toInt()
-                            val slot = slotMatch.groupValues[1].toInt()
-                            if (slot == slotIndex) {
-                                targetSubId = id
-                                println("Lapis 3 (Dumpsys Parsing) sukses, subId = $targetSubId")
-                                break
-                            }
-                        }
-                    }
-                }
-            } catch (t: Throwable) {
-                println("Lapis 3 gagal: ${t.message}")
-            }
-        }
-        
-        // Lapis 4: Fallback Static Method
-        if (targetSubId == -1) {
-            try {
-                val subManagerClass = Class.forName("android.telephony.SubscriptionManager")
-                val getSubIdMethod = subManagerClass.getMethod("getSubscriptionId", Int::class.java)
-                val res = getSubIdMethod.invoke(null, slotIndex) as? Int
-                if (res != null && res != -1) {
-                    targetSubId = res
-                    println("Lapis 4 (Static Fallback) sukses, subId = $targetSubId")
-                }
-            } catch (t: Throwable) {
-                println("Lapis 4 gagal: ${t.message}")
-            }
-        }
-        
-        // Final fallback
-        if (targetSubId == -1) {
-            targetSubId = slotIndex + 1
-            println("Semua lapis gagal, gunakan fallback kasar = $targetSubId")
-        }
-        
-        println("Resolved Subscription ID for slot $slotIndex: $targetSubId")
-
-        // 7. Invoke method
-        val invokeArgs = arrayOfNulls<Any>(paramTypes.size)
-        for (i in paramTypes.indices) {
-            val type = paramTypes[i]
-            when {
-                type.isAssignableFrom(List::class.java) -> invokeArgs[i] = specifiers
-                type == String::class.java -> invokeArgs[i] = "android"
-                type == Int::class.javaPrimitiveType || type == Int::class.javaObjectType -> {
-                    invokeArgs[i] = targetSubId
-                }
-                callbackType != null && type.isAssignableFrom(callbackType) -> invokeArgs[i] = callbackInstance
-                else -> invokeArgs[i] = null
-            }
-        }
-
-        try {
-            targetMethod.invoke(telephonyService, *invokeArgs)
-            println("Method invoked successfully. Waiting for callback...")
-            if (callbackType != null) {
-                val callbackReceived = latch.await(4, TimeUnit.SECONDS)
-                if (!callbackReceived) {
-                    println("WARNING: Timeout waiting for callback response. Operation might still succeed.")
-                    return true
-                }
-                return callbackSuccess
-            }
-            return true
         } catch (e: Exception) {
-            e.printStackTrace()
-            return false
+            return "ERROR: ${e.message}"
+        } finally {
+            try { socket.close() } catch (ignored: Exception) {}
         }
+        return "TIMEOUT"
+    }
+
+    private fun selectSimSlot(slotIndex: Int) {
+        println("Switching ATCI context to SIM slot $slotIndex...")
+        val res = sendAtCommand("AT+ESIMS=$slotIndex")
+        println("  Slot switch response: $res")
+        Thread.sleep(100)
+    }
+
+    private fun lockBandsAndPriority(bands: IntArray, priorityBand: Int, slotIndex: Int): Boolean {
+        selectSimSlot(slotIndex)
+        
+        // Calculate LTE Bitmask
+        var lteMaskLow = 0L
+        var lteMaskHigh = 0L
+        
+        for (b in bands) {
+            if (b in 1..32) {
+                lteMaskLow = lteMaskLow or (1L shl (b - 1))
+            } else if (b in 33..64) {
+                lteMaskHigh = lteMaskHigh or (1L shl (b - 33))
+            }
+        }
+        
+        // Execute EPBSE band lock command
+        // AT+EPBSE=<gsm>,<wcdma>,<lte_l>,<lte_h>,<nr_l>,<nr_h>,...
+        val epbseCmd = "AT+EPBSE=154,155,$lteMaskLow,$lteMaskHigh,0,0,0,0,0,0"
+        println("Sending Band Lock: $epbseCmd")
+        val epbseRes = sendAtCommand(epbseCmd)
+        println("  Response: $epbseRes")
+        
+        // Execute dynamic band priority command if specified
+        if (priorityBand > 0 && bands.contains(priorityBand)) {
+            println("Setting Primary cell priority to LTE Band $priorityBand...")
+            val egmcCmd = "AT+EGMC=1,\"priority_band\",$priorityBand"
+            val egmcRes = sendAtCommand(egmcCmd)
+            println("  Priority Response: $egmcRes")
+        }
+        
+        return epbseRes.contains("OK")
+    }
+
+    private fun resetModem(slotIndex: Int): Boolean {
+        selectSimSlot(slotIndex)
+        
+        // Restore all bands
+        println("Restoring all baseband bands...")
+        val epbseRes = sendAtCommand("AT+EPBSE=154,155,168165599,928,0,0,0,0,0,0")
+        println("  Band Restore Response: $epbseRes")
+        
+        // Disable priority band locking
+        val egmcRes = sendAtCommand("AT+EGMC=0,\"priority_band\"")
+        println("  Priority Reset Response: $egmcRes")
+        
+        // Restore RAT Mode to Auto
+        val eratRes = sendAtCommand("AT+ERAT=33")
+        println("  RAT Mode Auto Response: $eratRes")
+        
+        return epbseRes.contains("OK")
+    }
+
+    private fun setNetworkMode(ratMode: Int, slotIndex: Int): Boolean {
+        selectSimSlot(slotIndex)
+        println("Locking Network mode to RAT ID $ratMode...")
+        val eratRes = sendAtCommand("AT+ERAT=$ratMode")
+        println("  RAT Mode Response: $eratRes")
+        return eratRes.contains("OK")
+    }
+
+    private fun setCellLock(op: Int, mcc: String, mnc: String, earfcn: Int, pci: Int, slotIndex: Int): Boolean {
+        selectSimSlot(slotIndex)
+        // AT+EPLMNFREQ=<op>,<mcc>,<mnc>,<earfcn>,<pci>
+        val cmd = "AT+EPLMNFREQ=$op,$mcc,$mnc,$earfcn,$pci"
+        println("${if(op == 1) "Locking" else "Unlocking"} Cell Sector: $cmd")
+        val res = sendAtCommand(cmd)
+        println("  Cell Lock Response: $res")
+        return res.contains("OK")
     }
 }
