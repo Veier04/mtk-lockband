@@ -86,21 +86,19 @@ object RootHelper {
         println("Found target method: $targetMethod")
 
         // 4. Create RadioAccessSpecifier
-        // AccessNetworkConstants.AccessNetworkType.EUTRAN = 3 (LTE)
-        // If bands is empty, we don't compile specifiers (meaning reset to default)
         val specifiers = ArrayList<RadioAccessSpecifier>()
         if (bands.isNotEmpty()) {
             val ras = RadioAccessSpecifier(3, bands, intArrayOf())
             specifiers.add(ras)
         }
 
-        // 5. Generate Dynamic Proxy for the callback to monitor transaction success/failure
+        // 5. Generate Dynamic Proxy for the callback
         val paramTypes = targetMethod.parameterTypes
         val callbackType = paramTypes.find { it.isInterface && it.name.contains("Consumer") }
         
         var callbackInstance: Any? = null
         val latch = CountDownLatch(1)
-        var callbackResult: Int? = null
+        var callbackSuccess = false
 
         if (callbackType != null) {
             println("Found callback type: ${callbackType.name}")
@@ -108,22 +106,43 @@ object RootHelper {
                 callbackType.classLoader,
                 arrayOf(callbackType)
             ) { _, method, argsList ->
-                if (method.name == "accept" && argsList != null && argsList.isNotEmpty()) {
-                    callbackResult = argsList[0] as? Int
-                    println("Callback accepted value: $callbackResult")
+                // Support both accept(int) and accept(boolean) dynamically
+                if (argsList != null && argsList.isNotEmpty()) {
+                    val firstArg = argsList[0]
+                    println("Callback invoked with arg: $firstArg (${firstArg?.javaClass?.name})")
+                    if (firstArg is Boolean) {
+                        callbackSuccess = firstArg
+                    } else if (firstArg is Number) {
+                        callbackSuccess = (firstArg.toInt() == 0) // 0 means SUCCESS in integer interfaces
+                    }
                     latch.countDown()
                 }
                 null
             }
         }
 
-        // 6. Invoke method based on parameters count and positions
+        // 6. Invoke method mapping primitive types correctly
         val invokeArgs = arrayOfNulls<Any>(paramTypes.size)
         for (i in paramTypes.indices) {
             val type = paramTypes[i]
             when {
                 type.isAssignableFrom(List::class.java) -> invokeArgs[i] = specifiers
                 type == String::class.java -> invokeArgs[i] = "android"
+                type == Int::class.javaPrimitiveType || type == Int::class.javaObjectType -> {
+                    // Fetch default sub ID or use 1
+                    var subId = 1
+                    try {
+                        val subManagerClass = Class.forName("android.telephony.SubscriptionManager")
+                        val getDefaultSubId = subManagerClass.getMethod("getDefaultSubscriptionId")
+                        val res = getDefaultSubId.invoke(null) as Int
+                        if (res != -1) {
+                            subId = res
+                        }
+                    } catch (t: Throwable) {
+                        println("Could not read SubscriptionManager. Use fallback subId = 1")
+                    }
+                    invokeArgs[i] = subId
+                }
                 callbackType != null && type.isAssignableFrom(callbackType) -> invokeArgs[i] = callbackInstance
                 else -> invokeArgs[i] = null
             }
@@ -138,8 +157,7 @@ object RootHelper {
                     println("WARNING: Timeout waiting for callback response. Operation might still succeed.")
                     return true
                 }
-                // Check if callbackResult is success (usually 0 is SUCCESS)
-                return callbackResult == 0
+                return callbackSuccess
             }
             return true
         } catch (e: Exception) {

@@ -7,7 +7,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -64,6 +67,12 @@ fun LockBandScreen(apkPath: String) {
     var selectedBands by remember { mutableStateOf(setOf<Int>()) }
     var consoleOutput by remember { mutableStateOf("Ready. Status Root belum dicek.") }
     var isOperating by remember { mutableStateOf(false) }
+    val consoleScrollState = rememberScrollState()
+
+    // Auto-scroll to bottom when console text updates
+    LaunchedEffect(consoleOutput) {
+        consoleScrollState.animateScrollTo(consoleScrollState.maxValue)
+    }
 
     Column(
         modifier = Modifier
@@ -130,7 +139,7 @@ fun LockBandScreen(apkPath: String) {
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Console logger
+        // Console logger (Scrollable & Selection/Copy support)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -138,13 +147,17 @@ fun LockBandScreen(apkPath: String) {
                 .background(Color.Black, RoundedCornerShape(8.dp))
                 .padding(8.dp)
         ) {
-            Text(
-                text = consoleOutput,
-                color = Color(0xFF00FF00),
-                modifier = Modifier.fillMaxSize(),
-                fontSize = 11.sp,
-                lineHeight = 14.sp
-            )
+            SelectionContainer {
+                Text(
+                    text = consoleOutput,
+                    color = Color(0xFF00FF00),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(consoleScrollState),
+                    fontSize = 11.sp,
+                    lineHeight = 14.sp
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
