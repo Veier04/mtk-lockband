@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import android.telephony.CellInfoLte
 import android.telephony.CellInfoNr
+import android.telephony.CellIdentityNr
 import android.telephony.TelephonyManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -115,7 +116,7 @@ fun LockBandScreen(apkPath: String) {
             if (hasLocationPermission) {
                 activeBandInfo = getActiveCellBand(context, selectedSlot)
             } else {
-                activeBandInfo = "Butuh izin Lokasi untuk membaca info band."
+                activeBandInfo = "Butuh izin Lokasi untuk info band."
             }
             delay(2000)
         }
@@ -359,7 +360,6 @@ private fun getActiveCellBand(context: Context, slotIndex: Int): String {
         if (info.isRegistered) { // Only read registered cell tower
             if (info is CellInfoLte) {
                 val cellIdentity = info.cellIdentity
-                // getBands() is available on API 30+ (Android 11)
                 val bands = if (android.os.Build.VERSION.SDK_INT >= 30) {
                     cellIdentity.bands.joinToString(", ") { "B$it" }
                 } else {
@@ -367,13 +367,18 @@ private fun getActiveCellBand(context: Context, slotIndex: Int): String {
                 }
                 activeBands.add("LTE $bands (EARFCN: ${cellIdentity.earfcn})")
             } else if (info is CellInfoNr) {
-                val cellIdentity = info.cellIdentity
-                if (android.os.Build.VERSION.SDK_INT >= 30) {
-                    val bands = cellIdentity.bands.joinToString(", ") { "n$it" }
-                    activeBands.add("5G $bands (NR-ARFCN: ${cellIdentity.nrarfcn})")
+                val cellIdentity = info.cellIdentity as CellIdentityNr
+                val nrarfcn = cellIdentity.nrarfcn
+                val bands = if (android.os.Build.VERSION.SDK_INT >= 30) {
+                    try {
+                        cellIdentity.bands.joinToString(", ") { "n$it" }
+                    } catch (e: Exception) {
+                        "n${getNrBandFromNrarfcn(nrarfcn)}"
+                    }
                 } else {
-                    activeBands.add("5G Active (NR-ARFCN: ${cellIdentity.nrarfcn})")
+                    "n${getNrBandFromNrarfcn(nrarfcn)}"
                 }
+                activeBands.add("5G $bands (NR-ARFCN: $nrarfcn)")
             }
         }
     }
@@ -400,6 +405,18 @@ private fun getLteBandFromEarfcn(earfcn: Int): Int {
         in 37750..38249 -> 38
         in 38650..39449 -> 40
         in 39650..41589 -> 41
+        else -> 0
+    }
+}
+
+// Fallback logic to get NR Band from Nrarfcn
+private fun getNrBandFromNrarfcn(nrarfcn: Int): Int {
+    return when (nrarfcn) {
+        in 422000..434000 -> 1
+        in 360000..380000 -> 3
+        in 173900..178100 -> 8
+        in 460000..480000 -> 40
+        in 620000..653333 -> 78
         else -> 0
     }
 }
