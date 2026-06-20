@@ -56,6 +56,23 @@ object RootHelper {
         System.exit(0)
     }
 
+    // Typical Indonesian telecom EARFCN ranges mapping
+    private fun getCommonEarfcnForBand(band: Int): IntArray {
+        return when (band) {
+            1 -> intArrayOf(100, 225, 300, 325, 375, 425)                 // 2100 MHz (XL, Tsel, ISAT, Tri)
+            3 -> intArrayOf(1275, 1325, 1375, 1825, 1850)                // 1800 MHz (XL, Tsel, ISAT, Tri)
+            5 -> intArrayOf(2450, 2550, 2600)                            // 850 MHz (Smartfren, XL)
+            7 -> intArrayOf(2850, 3050, 3300)                            // 2600 MHz
+            8 -> intArrayOf(3500, 3525, 3550, 3575, 3740)                // 900 MHz (XL, ISAT, Tsel)
+            20 -> intArrayOf(6200, 6300, 6400)                           // 800 MHz
+            28 -> intArrayOf(9260, 9360, 9460)                           // 700 MHz (Tsel, ISAT)
+            38 -> intArrayOf(37900, 38000, 38100)                        // 2600 MHz TDD
+            40 -> intArrayOf(38950, 39150, 39350, 40100, 40300)          // 2300 MHz TDD (Smartfren, Tsel)
+            41 -> intArrayOf(39750, 40300, 40620, 41240)                 // 2500 MHz TDD (ISAT)
+            else -> intArrayOf()
+        }
+    }
+
     private fun setBands(bands: IntArray, slotIndex: Int): Boolean {
         println("Attempting to lock bands: ${if(bands.isEmpty()) "ALL/RESET" else bands.joinToString(", ")} on SIM slot $slotIndex")
         
@@ -89,11 +106,16 @@ object RootHelper {
 
         println("Found target method: $targetMethod")
 
-        // 4. Create RadioAccessSpecifier
+        // 4. Create RadioAccessSpecifier with explicit frequencies (EARFCN)
         val specifiers = ArrayList<RadioAccessSpecifier>()
         if (bands.isNotEmpty()) {
-            val ras = RadioAccessSpecifier(3, bands, intArrayOf())
-            specifiers.add(ras)
+            for (band in bands) {
+                val channels = getCommonEarfcnForBand(band)
+                // AccessNetworkConstants.AccessNetworkType.EUTRAN = 3 (LTE)
+                val ras = RadioAccessSpecifier(3, intArrayOf(band), channels)
+                specifiers.add(ras)
+                println("Built specifier for LTE Band $band with EARFCNs: ${channels.joinToString(", ")}")
+            }
         }
 
         // 5. Generate Dynamic Proxy for the callback
@@ -127,7 +149,7 @@ object RootHelper {
         // 6. Resolve subId (Quadruple Redundant)
         var targetSubId = -1
         
-        // Lapis 1: Query binder 'isub' Langsung (Prioritas Teratas - Paling Akurat untuk Root CLI)
+        // Lapis 1: Query binder 'isub' Langsung
         try {
             val isubBinder = getServiceMethod.invoke(null, "isub") as? IBinder
             if (isubBinder != null) {
@@ -225,7 +247,7 @@ object RootHelper {
             }
         }
         
-        // Final fallback: default subId ke slot index + 1 (mencegah -1)
+        // Final fallback
         if (targetSubId == -1) {
             targetSubId = slotIndex + 1
             println("Semua lapis gagal, gunakan fallback kasar = $targetSubId")
