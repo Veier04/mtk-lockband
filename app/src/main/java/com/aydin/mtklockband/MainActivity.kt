@@ -118,16 +118,16 @@ fun LockBandScreen(apkPath: String) {
     }
 
     val launcher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission(),
-        onResult = { isGranted ->
-            hasLocationPermission = isGranted
+        contract = ActivityResultContracts.RequestMultiplePermissions(),
+        onResult = { permissions ->
+            hasLocationPermission = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true
         }
     )
 
     // Request permissions on launch
     LaunchedEffect(Unit) {
         if (!hasLocationPermission) {
-            launcher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+            launcher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.READ_PHONE_STATE))
         }
     }
 

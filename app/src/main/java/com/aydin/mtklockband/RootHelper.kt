@@ -128,7 +128,7 @@ object RootHelper {
             out.write(payload)
             out.flush()
             
-            socket.soTimeout = 5000
+            socket.soTimeout = 8000
             val input = socket.inputStream
             
             val resHeader = ByteArray(4)
@@ -139,22 +139,43 @@ object RootHelper {
                 readHeaderLen += r
             }
             
+            
             if (readHeaderLen == 4) {
-                val resLen = ((resHeader[0].toInt() and 0xFF) shl 24) or
+                // MTK length could be little-endian or big-endian. Python was Big-Endian, but let's be careful.
+                var resLen = ((resHeader[0].toInt() and 0xFF) shl 24) or
                              ((resHeader[1].toInt() and 0xFF) shl 16) or
                              ((resHeader[2].toInt() and 0xFF) shl 8) or
                              (resHeader[3].toInt() and 0xFF)
-                             
+                
+                // If it's absurdly large, try Little-Endian fallback or cap it.
+                if (resLen > 10000 || resLen < 0) {
+                    resLen = ((resHeader[3].toInt() and 0xFF) shl 24) or
+                             ((resHeader[2].toInt() and 0xFF) shl 16) or
+                             ((resHeader[1].toInt() and 0xFF) shl 8) or
+                             (resHeader[0].toInt() and 0xFF)
+                }
+                if (resLen > 10000 || resLen < 0) resLen = 4096 // Fallback cap
+
                 val resPayload = ByteArray(resLen)
                 var readPayloadLen = 0
+                // Read up to resLen, but stop if available() is 0 after a short delay, to prevent timeout
                 while (readPayloadLen < resLen) {
-                    val r = input.read(resPayload, readPayloadLen, resLen - readPayloadLen)
-                    if (r == -1) break
-                    readPayloadLen += r
+                    val avail = input.available()
+                    if (avail > 0) {
+                        val toRead = Math.min(avail, resLen - readPayloadLen)
+                        val r = input.read(resPayload, readPayloadLen, toRead)
+                        if (r == -1) break
+                        readPayloadLen += r
+                    } else {
+                        // Wait a bit instead of blocking indefinitely if not fully arrived
+                        Thread.sleep(50)
+                        if (input.available() == 0) break // Assume transmission done
+                    }
                 }
-                return String(resPayload, Charsets.UTF_8).trim()
+                val finalRes = String(resPayload, 0, readPayloadLen, Charsets.UTF_8).trim()
+                return "OK($readPayloadLen bytes): $finalRes"
             }
-        } catch (e: Exception) {
+} catch (e: Exception) {
             return "OK_TIMEOUT_OR_ERR: ${e.message}"
         } finally {
             try { socket.close() } catch (ignored: Exception) {}
@@ -192,6 +213,7 @@ object RootHelper {
         println("  Response: $epbseRes")
         
         // Execute dynamic band priority command if specified
+        println("  [DEBUG] Evaluating CA Priority: priorityBand=$priorityBand, inBands=${bands.contains(priorityBand)}")
         if (priorityBand > 0 && bands.contains(priorityBand)) {
             println("Setting Primary cell priority to LTE Band $priorityBand...")
             val egmcCmd = "AT+EGMC=1,\"priority_band\",$priorityBand"
