@@ -22,6 +22,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import android.location.LocationManager
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -101,6 +102,7 @@ fun LockBandScreen(apkPath: String) {
 
     // Logs & Diagnostics state
     var consoleOutput by remember { mutableStateOf("Ready. Pilih Tab kuncian yang Anda inginkan.") }
+    val globalLog = remember { mutableStateListOf<String>("APP START OK") }
     var isOperating by remember { mutableStateOf(false) }
     
     // Realtime diagnostics state
@@ -158,14 +160,14 @@ fun LockBandScreen(apkPath: String) {
     ) {
         // App Header
         Text(
-            text = "MTK ULTRA LOCK BAND",
+            text = "MTK LOCK BAND",
             fontSize = 22.sp,
             fontWeight = FontWeight.ExtraBold,
             color = Color.White,
             modifier = Modifier.padding(bottom = 2.dp)
         )
         Text(
-            text = "MediaTek Developer Utility (AOSP Root)",
+            text = "MediaTek Developer Utility (AOSP) | by @B_ipul04",
             fontSize = 11.sp,
             color = Color.LightGray,
             modifier = Modifier.padding(bottom = 12.dp)
@@ -419,8 +421,8 @@ fun LockBandScreen(apkPath: String) {
                                         consoleOutput = "Silakan pilih minimal 1 band terlebih dahulu."
                                         return@Button
                                     }
-                                    isOperating = true
-                                    consoleOutput = "Memproses kuncian..."
+                                    isOperating = true; globalLog.add("[CMD] Executing action...")
+                                    
                                     coroutineScope.launch {
                                         val bandsParam = selectedBands.joinToString(",")
                                         
@@ -431,6 +433,7 @@ fun LockBandScreen(apkPath: String) {
                                         val ratResult = runRootCommand("rat", "$ratMode $selectedSlot", apkPath)
                                         
                                         consoleOutput = "KUNCI BAND:\n$lockResult\n------------------\nLOCK RAT:\n$ratResult"
+                                        globalLog.add("[LOCK EXEC] BAND: $lockResult | RAT: $ratResult")
                                         isOperating = false
                                     }
                                 },
@@ -444,11 +447,11 @@ fun LockBandScreen(apkPath: String) {
 
                             Button(
                                 onClick = {
-                                    isOperating = true
+                                    isOperating = true; globalLog.add("[CMD] Executing action...")
                                     consoleOutput = "Mereset modem ke status default..."
                                     coroutineScope.launch {
                                         val result = runRootCommand("reset", "$selectedSlot", apkPath)
-                                        consoleOutput = result
+                                        consoleOutput = result; globalLog.add("[RESULT]: $result")
                                         selectedBands = emptySet()
                                         priorityBand = 0
                                         ratMode = 33
@@ -515,11 +518,11 @@ fun LockBandScreen(apkPath: String) {
                                         consoleOutput = "ERROR: Parameter input MCC/MNC/EARFCN/PCI tidak boleh kosong."
                                         return@Button
                                     }
-                                    isOperating = true
+                                    isOperating = true; globalLog.add("[CMD] Executing action...")
                                     consoleOutput = "Mengunci pemancar target..."
                                     coroutineScope.launch {
                                         val result = runRootCommand("lock_cell", "$mccInput $mncInput $earfcn $pci $selectedSlot", apkPath)
-                                        consoleOutput = result
+                                        consoleOutput = result; globalLog.add("[RESULT]: $result")
                                         isOperating = false
                                     }
                                 },
@@ -535,11 +538,11 @@ fun LockBandScreen(apkPath: String) {
                                 onClick = {
                                     val earfcn = earfcnInput.toIntOrNull() ?: 0
                                     val pci = pciInput.toIntOrNull() ?: 0
-                                    isOperating = true
+                                    isOperating = true; globalLog.add("[CMD] Executing action...")
                                     consoleOutput = "Membuka kunci pemancar..."
                                     coroutineScope.launch {
                                         val result = runRootCommand("unlock_cell", "$mccInput $mncInput $earfcn $pci $selectedSlot", apkPath)
-                                        consoleOutput = result
+                                        consoleOutput = result; globalLog.add("[RESULT]: $result")
                                         isOperating = false
                                     }
                                 },
@@ -562,7 +565,7 @@ fun LockBandScreen(apkPath: String) {
                     ) {
                         SelectionContainer {
                             Text(
-                                text = consoleOutput,
+                                text = globalLog.joinToString("\n"),
                                 color = Color(0xFF00FF00),
                                 modifier = Modifier
                                     .fillMaxSize()
@@ -607,6 +610,11 @@ private fun readCellDiagnostics(context: Context, slotIndex: Int): CellDiagnosti
         return CellDiagnostics(activeCellDisc = "Butuh izin Lokasi")
     }
 
+    
+    val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+    if (lm != null && !lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+        return CellDiagnostics(activeCellDisc = "GPS MATI (Wajib Aktif)")
+    }
     val cellInfos = tm.allCellInfo ?: return CellDiagnostics()
     for (info in cellInfos) {
         if (info.isRegistered) {

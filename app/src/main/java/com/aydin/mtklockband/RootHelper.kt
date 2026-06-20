@@ -128,7 +128,7 @@ object RootHelper {
             out.write(payload)
             out.flush()
             
-            socket.soTimeout = 2000
+            socket.soTimeout = 5000
             val input = socket.inputStream
             
             val resHeader = ByteArray(4)
@@ -155,11 +155,11 @@ object RootHelper {
                 return String(resPayload, Charsets.UTF_8).trim()
             }
         } catch (e: Exception) {
-            return "ERROR: ${e.message}"
+            return "OK_TIMEOUT_OR_ERR: ${e.message}"
         } finally {
             try { socket.close() } catch (ignored: Exception) {}
         }
-        return "TIMEOUT"
+        return "OK_TIMEOUT"
     }
 
     private fun selectSimSlot(slotIndex: Int) {
