@@ -58,14 +58,15 @@ fun LockBandScreen(apkPath: String) {
         listOf(
             BandItem(1, "2100 MHz (XL, Tsel, Indosat, Tri)"),
             BandItem(3, "1800 MHz (XL, Tsel, Indosat, Tri)"),
-            BandItem(5, "850 MHz (Smartfren)"),
+            BandItem(5, "850 MHz (Smartfren, XL)"),
             BandItem(8, "900 MHz (XL, Tsel, Indosat)"),
             BandItem(40, "2300 MHz (Smartfren, Tsel)")
         )
     }
 
     var selectedBands by remember { mutableStateOf(setOf<Int>()) }
-    var consoleOutput by remember { mutableStateOf("Ready. Status Root belum dicek.") }
+    var selectedSlot by remember { mutableIntStateOf(0) } // 0 = SIM 1, 1 = SIM 2
+    var consoleOutput by remember { mutableStateOf("Ready. Pilih SIM Card dan Band untuk dikunci.") }
     var isOperating by remember { mutableStateOf(false) }
     val consoleScrollState = rememberScrollState()
 
@@ -85,17 +86,66 @@ fun LockBandScreen(apkPath: String) {
             fontSize = 24.sp,
             fontWeight = FontWeight.Bold,
             color = Color.White,
-            modifier = Modifier.padding(bottom = 8.dp)
+            modifier = Modifier.padding(bottom = 4.dp)
         )
 
         Text(
             text = "AOSP Universal Band Selection (Root Required)",
-            fontSize = 12.sp,
+            fontSize = 11.sp,
             color = Color.Gray,
-            modifier = Modifier.padding(bottom = 16.dp)
+            modifier = Modifier.padding(bottom = 12.dp)
         )
 
-        // Lazy check box list
+        // SIM card slot selector
+        Text(
+            text = "PILIH SLOT SIM CARD:",
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color.LightGray,
+            modifier = Modifier.align(Alignment.Start).padding(bottom = 6.dp)
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Button(
+                onClick = { selectedSlot = 0 },
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (selectedSlot == 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface
+                ),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text(
+                    text = "SIM 1 (Slot 0)", 
+                    color = if (selectedSlot == 0) Color.White else Color.LightGray,
+                    fontSize = 13.sp
+                )
+            }
+            Button(
+                onClick = { selectedSlot = 1 },
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (selectedSlot == 1) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface
+                ),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text(
+                    text = "SIM 2 (Slot 1)", 
+                    color = if (selectedSlot == 1) Color.White else Color.LightGray,
+                    fontSize = 13.sp
+                )
+            }
+        }
+
+        // Checklist band
+        Text(
+            text = "PILIH BAND LTE YANG INGIN DIAKTIFKAN:",
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color.LightGray,
+            modifier = Modifier.align(Alignment.Start).padding(bottom = 6.dp)
+        )
         LazyColumn(
             modifier = Modifier
                 .weight(1f)
@@ -107,7 +157,7 @@ fun LockBandScreen(apkPath: String) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 4.dp),
+                        .padding(vertical = 2.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Checkbox(
@@ -137,13 +187,13 @@ fun LockBandScreen(apkPath: String) {
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
         // Console logger (Scrollable & Selection/Copy support)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(150.dp)
+                .height(130.dp)
                 .background(Color.Black, RoundedCornerShape(8.dp))
                 .padding(8.dp)
         ) {
@@ -160,7 +210,7 @@ fun LockBandScreen(apkPath: String) {
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
         // Actions
         Row(
@@ -177,7 +227,7 @@ fun LockBandScreen(apkPath: String) {
                     consoleOutput = "Mengunci band..."
                     coroutineScope.launch {
                         val bandsParam = selectedBands.joinToString(",")
-                        val result = runRootCommand("lock", bandsParam, apkPath)
+                        val result = runRootCommand("lock", "$bandsParam $selectedSlot", apkPath)
                         consoleOutput = result
                         isOperating = false
                     }
@@ -195,7 +245,7 @@ fun LockBandScreen(apkPath: String) {
                     isOperating = true
                     consoleOutput = "Mereset ke default..."
                     coroutineScope.launch {
-                        val result = runRootCommand("reset", "", apkPath)
+                        val result = runRootCommand("reset", "$selectedSlot", apkPath)
                         consoleOutput = result
                         selectedBands = emptySet()
                         isOperating = false

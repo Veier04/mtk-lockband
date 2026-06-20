@@ -12,7 +12,7 @@ object RootHelper {
     @JvmStatic
     fun main(args: Array<String>) {
         if (args.isEmpty()) {
-            println("ERROR: No arguments. Use 'lock <bands_comma_separated>' or 'reset'")
+            println("ERROR: No arguments. Use 'lock <bands> <slot>' or 'reset <slot>'")
             System.exit(1)
         }
 
@@ -20,11 +20,13 @@ object RootHelper {
         try {
             when (cmd) {
                 "lock" -> {
-                    if (args.size < 2) {
-                        println("ERROR: Missing bands list")
+                    if (args.size < 3) {
+                        println("ERROR: Missing arguments. Usage: lock <bands> <slot_index>")
                         System.exit(1)
                     }
                     val bandStr = args[1]
+                    val slotIndex = args[2].toIntOrNull() ?: 0
+                    
                     val bands = bandStr.split(",")
                         .mapNotNull { it.trim().toIntOrNull() }
                         .toIntArray()
@@ -34,11 +36,12 @@ object RootHelper {
                         System.exit(1)
                     }
 
-                    val success = setBands(bands)
+                    val success = setBands(bands, slotIndex)
                     println("RESULT:" + if (success) "SUCCESS" else "FAILED")
                 }
                 "reset" -> {
-                    val success = setBands(intArrayOf())
+                    val slotIndex = if (args.size >= 2) args[1].toIntOrNull() ?: 0 else 0
+                    val success = setBands(intArrayOf(), slotIndex)
                     println("RESULT:" + if (success) "SUCCESS" else "FAILED")
                 }
                 else -> {
@@ -53,8 +56,8 @@ object RootHelper {
         System.exit(0)
     }
 
-    private fun setBands(bands: IntArray): Boolean {
-        println("Attempting to lock bands: ${bands.joinToString(", ")}")
+    private fun setBands(bands: IntArray, slotIndex: Int): Boolean {
+        println("Attempting to lock bands: ${if(bands.isEmpty()) "ALL/RESET" else bands.joinToString(", ")} on SIM slot $slotIndex")
         
         // 1. Get ServiceManager class
         val serviceManagerClass = Class.forName("android.os.ServiceManager")
@@ -123,25 +126,40 @@ object RootHelper {
 
         // 6. Invoke method mapping primitive types correctly
         val invokeArgs = arrayOfNulls<Any>(paramTypes.size)
+        
+        // Find subscription ID for the given slotIndex
+        var targetSubId = -1
+        try {
+            val subManagerClass = Class.forName("android.telephony.SubscriptionManager")
+            val getSubIdsMethod = subManagerClass.getMethod("getSubscriptionIds", Int::class.java)
+            val subIds = getSubIdsMethod.invoke(null, slotIndex) as? IntArray
+            if (subIds != null && subIds.isNotEmpty()) {
+                targetSubId = subIds[0]
+            }
+        } catch (t: Throwable) {
+            println("Failed to read SubscriptionManager for slot. Error: ${t.message}")
+        }
+        
+        // Fallback to default subscription ID if slot manager fails
+        if (targetSubId == -1) {
+            try {
+                val subManagerClass = Class.forName("android.telephony.SubscriptionManager")
+                val getDefaultSubId = subManagerClass.getMethod("getDefaultSubscriptionId")
+                targetSubId = getDefaultSubId.invoke(null) as Int
+            } catch (t: Throwable) {
+                targetSubId = 1
+            }
+        }
+        
+        println("Resolved Subscription ID for slot $slotIndex: $targetSubId")
+
         for (i in paramTypes.indices) {
             val type = paramTypes[i]
             when {
                 type.isAssignableFrom(List::class.java) -> invokeArgs[i] = specifiers
                 type == String::class.java -> invokeArgs[i] = "android"
                 type == Int::class.javaPrimitiveType || type == Int::class.javaObjectType -> {
-                    // Fetch default sub ID or use 1
-                    var subId = 1
-                    try {
-                        val subManagerClass = Class.forName("android.telephony.SubscriptionManager")
-                        val getDefaultSubId = subManagerClass.getMethod("getDefaultSubscriptionId")
-                        val res = getDefaultSubId.invoke(null) as Int
-                        if (res != -1) {
-                            subId = res
-                        }
-                    } catch (t: Throwable) {
-                        println("Could not read SubscriptionManager. Use fallback subId = 1")
-                    }
-                    invokeArgs[i] = subId
+                    invokeArgs[i] = targetSubId
                 }
                 callbackType != null && type.isAssignableFrom(callbackType) -> invokeArgs[i] = callbackInstance
                 else -> invokeArgs[i] = null
@@ -155,6 +173,7 @@ object RootHelper {
                 val callbackReceived = latch.await(4, TimeUnit.SECONDS)
                 if (!callbackReceived) {
                     println("WARNING: Timeout waiting for callback response. Operation might still succeed.")
+                    // Fallback to true if invocation succeeded but callback timed out
                     return true
                 }
                 return callbackSuccess
