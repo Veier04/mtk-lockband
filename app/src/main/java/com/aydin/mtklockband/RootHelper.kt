@@ -66,6 +66,15 @@ object RootHelper {
                     val success = setCellLock(1, mcc, mnc, earfcn, pci, slotIndex)
                     println("RESULT:" + if (success) "SUCCESS" else "FAILED")
                 }
+                
+                "raw" -> {
+                    if (args.size < 2) {
+                        println("ERROR: Missing AT Command")
+                        System.exit(1)
+                    }
+                    val atCmd = args.drop(1).joinToString(" ")
+                    println(sendAtCommand(atCmd))
+                }
                 "unlock_cell" -> {
                     // unlock_cell <mcc> <mnc> <earfcn> <pci> <slot>
                     if (args.size < 6) {

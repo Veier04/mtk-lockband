@@ -102,6 +102,7 @@ fun LockBandScreen(apkPath: String) {
 
     // Logs & Diagnostics state
     var consoleOutput by remember { mutableStateOf("Ready. Pilih Tab kuncian yang Anda inginkan.") }
+    var atCommandInput by remember { mutableStateOf("") }
     val globalLog = remember { mutableStateListOf<String>("APP START OK") }
     var isOperating by remember { mutableStateOf(false) }
     
@@ -557,22 +558,56 @@ fun LockBandScreen(apkPath: String) {
                     }
                 }
                 3 -> { // TAB 4: Logs Console
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color.Black, RoundedCornerShape(12.dp))
-                            .padding(8.dp)
-                    ) {
-                        SelectionContainer {
-                            Text(
-                                text = globalLog.joinToString("\n"),
-                                color = Color(0xFF00FF00),
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .verticalScroll(consoleScrollState),
-                                fontSize = 10.sp,
-                                lineHeight = 13.sp
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .background(Color.Black, RoundedCornerShape(12.dp))
+                                .padding(8.dp)
+                        ) {
+                            SelectionContainer {
+                                Text(
+                                    text = globalLog.joinToString("\n"),
+                                    color = Color(0xFF00FF00),
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .verticalScroll(consoleScrollState),
+                                    fontSize = 10.sp,
+                                    lineHeight = 13.sp
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(
+                                value = atCommandInput,
+                                onValueChange = { atCommandInput = it },
+                                placeholder = { Text("Ketik command, cth: AT+ECA?") },
+                                modifier = Modifier.weight(1f),
+                                singleLine = true,
+                                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp)
                             )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Button(
+                                onClick = {
+                                    if (atCommandInput.isNotEmpty()) {
+                                        val cmd = atCommandInput
+                                        atCommandInput = ""
+                                        isOperating = true
+                                        globalLog.add("[AT_TX]: $cmd")
+                                        coroutineScope.launch {
+                                            val res = runRootCommand("raw", cmd, apkPath)
+                                            globalLog.add("[AT_RX]: $res")
+                                            isOperating = false
+                                        }
+                                    }
+                                },
+                                enabled = !isOperating,
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                            ) {
+                                Text("SEND")
+                            }
                         }
                     }
                 }
